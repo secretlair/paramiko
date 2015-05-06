@@ -21,7 +21,10 @@ from datetime import datetime
 import os
 from shlex import split as shlsplit
 import signal
-from subprocess import Popen, PIPE
+try:
+    from subprocess import Popen, PIPE
+except ImportError:
+    Popen = PIPE = None
 from select import select
 import socket
 import time
