@@ -24,6 +24,7 @@ import signal
 try:
     from subprocess import Popen, PIPE
 except ImportError:
+    # See https://github.com/paramiko/paramiko/pull/334
     Popen = PIPE = None
 from select import select
 import socket
