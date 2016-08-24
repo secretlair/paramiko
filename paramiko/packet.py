@@ -103,6 +103,10 @@ class Packetizer (object):
         self.__handshake_complete = False
         self.__timer_expired = False
 
+    @property
+    def closed(self):
+        return self.__closed
+
     def set_log(self, log):
         """
         Set the Python log object to use for logging.
@@ -204,9 +208,10 @@ class Packetizer (object):
     def handshake_timed_out(self):
         """
         Checks if the handshake has timed out.
-        If `start_handshake` wasn't called before the call to this function
-        the return value will always be `False`.
-        If the handshake completed before a time out was reached the return value will be `False`
+
+        If `start_handshake` wasn't called before the call to this function,
+        the return value will always be `False`. If the handshake completed
+        before a timeout was reached, the return value will be `False`
 
         :return: handshake time out status, as a `bool`
         """
@@ -352,7 +357,7 @@ class Packetizer (object):
                 self._log(DEBUG, 'Write packet <%s>, length %d' % (cmd_name, orig_len))
                 self._log(DEBUG, util.format_binary(packet, 'OUT: '))
             if self.__block_engine_out is not None:
-                out = self.__block_engine_out.encrypt(packet)
+                out = self.__block_engine_out.update(packet)
             else:
                 out = packet
             # + mac
@@ -385,11 +390,12 @@ class Packetizer (object):
         """
         header = self.read_all(self.__block_size_in, check_rekey=True)
         if self.__block_engine_in is not None:
-            header = self.__block_engine_in.decrypt(header)
+            header = self.__block_engine_in.update(header)
         if self.__dump_packets:
             self._log(DEBUG, util.format_binary(header, 'IN: '))
         packet_size = struct.unpack('>I', header[:4])[0]
-        # leftover contains decrypted bytes from the first block (after the length field)
+        # leftover contains decrypted bytes from the first block (after the
+        # length field)
         leftover = header[4:]
         if (packet_size - len(leftover)) % self.__block_size_in != 0:
             raise SSHException('Invalid packet blocking')
@@ -397,7 +403,7 @@ class Packetizer (object):
         packet = buf[:packet_size - len(leftover)]
         post_packet = buf[packet_size - len(leftover):]
         if self.__block_engine_in is not None:
-            packet = self.__block_engine_in.decrypt(packet)
+            packet = self.__block_engine_in.update(packet)
         if self.__dump_packets:
             self._log(DEBUG, util.format_binary(packet, 'IN: '))
         packet = leftover + packet

@@ -28,10 +28,11 @@ import socket
 import time
 import threading
 import random
+from hashlib import sha1
 import unittest
 
 from paramiko import Transport, SecurityOptions, ServerInterface, RSAKey, DSSKey, \
-    SSHException, ChannelException
+    SSHException, ChannelException, Packetizer
 from paramiko import AUTH_FAILED, AUTH_SUCCESSFUL
 from paramiko import OPEN_SUCCEEDED, OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
 from paramiko.common import MSG_KEXINIT, cMSG_CHANNEL_WINDOW_ADJUST, \
@@ -77,7 +78,7 @@ class NullServer (ServerInterface):
         return OPEN_SUCCEEDED
 
     def check_channel_exec_request(self, channel, command):
-        if command != 'yes':
+        if command != b'yes':
             return False
         return True
 
@@ -251,7 +252,7 @@ class TransportTest(unittest.TestCase):
         chan = self.tc.open_session()
         schan = self.ts.accept(1.0)
         try:
-            chan.exec_command('no')
+            chan.exec_command(b'command contains \xfc and is not a valid UTF-8 string')
             self.assertTrue(False)
         except SSHException:
             pass
@@ -447,9 +448,11 @@ class TransportTest(unittest.TestCase):
         bytes = self.tc.packetizer._Packetizer__sent_bytes
         chan.send('x' * 1024)
         bytes2 = self.tc.packetizer._Packetizer__sent_bytes
+        block_size = self.tc._cipher_info[self.tc.local_cipher]['block-size']
+        mac_size = self.tc._mac_info[self.tc.local_mac]['size']
         # tests show this is actually compressed to *52 bytes*!  including packet overhead!  nice!! :)
         self.assertTrue(bytes2 - bytes < 1024)
-        self.assertEqual(52, bytes2 - bytes)
+        self.assertEqual(16 + block_size + mac_size, bytes2 - bytes)
 
         chan.close()
         schan.close()
@@ -797,6 +800,22 @@ class TransportTest(unittest.TestCase):
         """
         verify that we can get a hanshake timeout.
         """
+        # Tweak client Transport instance's Packetizer instance so
+        # its read_message() sleeps a bit. This helps prevent race conditions
+        # where the client Transport's timeout timer thread doesn't even have
+        # time to get scheduled before the main client thread finishes
+        # handshaking with the server.
+        # (Doing this on the server's transport *sounds* more 'correct' but
+        # actually doesn't work nearly as well for whatever reason.)
+        class SlowPacketizer(Packetizer):
+            def read_message(self):
+                time.sleep(1)
+                return super(SlowPacketizer, self).read_message()
+        # NOTE: prettttty sure since the replaced .packetizer Packetizer is now
+        # no longer doing anything with its copy of the socket...everything'll
+        # be fine. Even tho it's a bit squicky.
+        self.tc.packetizer = SlowPacketizer(self.tc.sock)
+        # Continue with regular test red tape.
         host_key = RSAKey.from_private_key_file(test_path('test_rsa.key'))
         public_host_key = RSAKey(data=host_key.asbytes())
         self.ts.add_server_key(host_key)
@@ -809,3 +828,21 @@ class TransportTest(unittest.TestCase):
                           hostkey=public_host_key,
                           username='slowdive',
                           password='pygmalion')
+
+    def test_M_select_after_close(self):
+        """
+        verify that select works when a channel is already closed.
+        """
+        self.setup_test_server()
+        chan = self.tc.open_session()
+        chan.invoke_shell()
+        schan = self.ts.accept(1.0)
+        schan.close()
+
+        # give client a moment to receive close notification
+        time.sleep(0.1)
+
+        r, w, e = select.select([chan], [], [], 0.1)
+        self.assertEqual([chan], r)
+        self.assertEqual([], w)
+        self.assertEqual([], e)

@@ -164,10 +164,23 @@ class SSHClient (ClosingContextManager):
 
     def set_missing_host_key_policy(self, policy):
         """
-        Set the policy to use when connecting to a server that doesn't have a
-        host key in either the system or local `.HostKeys` objects.  The
-        default policy is to reject all unknown servers (using `.RejectPolicy`).
-        You may substitute `.AutoAddPolicy` or write your own policy class.
+        Set policy to use when connecting to servers without a known host key.
+
+        Specifically:
+
+        * A **policy** is an instance of a "policy class", namely some subclass
+          of `.MissingHostKeyPolicy` such as `.RejectPolicy` (the default),
+          `.AutoAddPolicy`, `.WarningPolicy`, or a user-created subclass.
+
+          .. note::
+            This method takes class **instances**, not **classes** themselves.
+            Thus it must be called as e.g.
+            ``.set_missing_host_key_policy(WarningPolicy())`` and *not*
+            ``.set_missing_host_key_policy(WarningPolicy)``.
+
+        * A host key is **known** when it appears in the client object's cached
+          host keys structures (those manipulated by `load_system_host_keys`
+          and/or `load_host_keys`).
 
         :param .MissingHostKeyPolicy policy:
             the policy to use when receiving a host key from a
@@ -256,7 +269,8 @@ class SSHClient (ClosingContextManager):
         :param socket sock:
             an open socket or socket-like object (such as a `.Channel`) to use
             for communication to the target host
-        :param bool gss_auth: ``True`` if you want to use GSS-API authentication
+        :param bool gss_auth:
+            ``True`` if you want to use GSS-API authentication
         :param bool gss_kex:
             Perform GSS-API Key Exchange and user authentication
         :param bool gss_deleg_creds: Delegate GSS-API client credentials or not
@@ -368,6 +382,12 @@ class SSHClient (ClosingContextManager):
     def close(self):
         """
         Close this SSHClient and its underlying `.Transport`.
+
+        .. warning::
+            Failure to do this may, in some situations, cause your Python
+            interpreter to hang at shutdown (often due to race conditions).
+            It's good practice to `close` your client objects anytime you're
+            done using them, instead of relying on garbage collection.
         """
         if self._transport is None:
             return
@@ -463,7 +483,8 @@ class SSHClient (ClosingContextManager):
         """
         saved_exception = None
         two_factor = False
-        allowed_types = []
+        allowed_types = set()
+        two_factor_types = set(['keyboard-interactive','password'])
 
         # If GSS-API support and GSS-PI Key Exchange was performed, we attempt
         # authentication with gssapi-keyex.
@@ -489,8 +510,8 @@ class SSHClient (ClosingContextManager):
         if pkey is not None:
             try:
                 self._log(DEBUG, 'Trying SSH key %s' % hexlify(pkey.get_fingerprint()))
-                allowed_types = self._transport.auth_publickey(username, pkey)
-                two_factor = (allowed_types == ['password'])
+                allowed_types = set(self._transport.auth_publickey(username, pkey))
+                two_factor = (allowed_types & two_factor_types)
                 if not two_factor:
                     return
             except SSHException as e:
@@ -502,8 +523,8 @@ class SSHClient (ClosingContextManager):
                     try:
                         key = pkey_class.from_private_key_file(key_filename, password)
                         self._log(DEBUG, 'Trying key %s from %s' % (hexlify(key.get_fingerprint()), key_filename))
-                        self._transport.auth_publickey(username, key)
-                        two_factor = (allowed_types == ['password'])
+                        allowed_types = set(self._transport.auth_publickey(username, key))
+                        two_factor = (allowed_types & two_factor_types)
                         if not two_factor:
                             return
                         break
@@ -517,9 +538,9 @@ class SSHClient (ClosingContextManager):
             for key in self._agent.get_keys():
                 try:
                     self._log(DEBUG, 'Trying SSH agent key %s' % hexlify(key.get_fingerprint()))
-                    # for 2-factor auth a successfully auth'd key will result in ['password']
-                    allowed_types = self._transport.auth_publickey(username, key)
-                    two_factor = (allowed_types == ['password'])
+                    # for 2-factor auth a successfully auth'd key password will return an allowed 2fac auth method
+                    allowed_types = set(self._transport.auth_publickey(username, key))
+                    two_factor = (allowed_types & two_factor_types)
                     if not two_factor:
                         return
                     break
@@ -556,8 +577,8 @@ class SSHClient (ClosingContextManager):
                     key = pkey_class.from_private_key_file(filename, password)
                     self._log(DEBUG, 'Trying discovered key %s in %s' % (hexlify(key.get_fingerprint()), filename))
                     # for 2-factor auth a successfully auth'd key will result in ['password']
-                    allowed_types = self._transport.auth_publickey(username, key)
-                    two_factor = (allowed_types == ['password'])
+                    allowed_types = set(self._transport.auth_publickey(username, key))
+                    two_factor = (allowed_types & two_factor_types)
                     if not two_factor:
                         return
                     break
@@ -571,7 +592,11 @@ class SSHClient (ClosingContextManager):
             except SSHException as e:
                 saved_exception = e
         elif two_factor:
-            raise SSHException('Two-factor authentication requires a password')
+            try:
+                self._transport.auth_interactive_dumb(username)
+                return
+            except SSHException as e:
+                saved_exception = e
 
         # if we got an auth-failed exception earlier, re-raise it
         if saved_exception is not None:
