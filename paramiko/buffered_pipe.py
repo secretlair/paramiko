@@ -70,27 +70,18 @@ class BufferedPipe (object):
         
         :param threading.Event event: the event to set/clear
         """
-        self._lock.acquire()
-        try:
-            self._event = event
-            # Make sure the event starts in `set` state if we appear to already
-            # be closed; otherwise, if we start in `clear` state & are closed,
-            # nothing will ever call `.feed` and the event (& OS pipe, if we're
-            # wrapping one - see `Channel.fileno`) will permanently stay in
-            # `clear`, causing deadlock if e.g. `select`ed upon.
-            if self._closed or len(self._buffer) > 0:
-                event.set()
-            else:
-                event.clear()
-        finally:
-            self._lock.release()
+        self._event = event
+        if len(self._buffer) > 0:
+            event.set()
+        else:
+            event.clear()
         
     def feed(self, data):
         """
         Feed new data into this pipe.  This method is assumed to be called
         from a separate thread, so synchronization is done.
         
-        :param data: the data to add, as a `str` or `bytes`
+        :param data: the data to add, as a `str`
         """
         self._lock.acquire()
         try:
@@ -134,7 +125,7 @@ class BufferedPipe (object):
         :param int nbytes: maximum number of bytes to read
         :param float timeout:
             maximum seconds to wait (or ``None``, the default, to wait forever)
-        :return: the read data, as a `bytes`
+        :return: the read data, as a `str`
         
         :raises PipeTimeout:
             if a timeout was specified and no data was ready before that

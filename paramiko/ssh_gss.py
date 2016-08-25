@@ -39,8 +39,22 @@ import sys
 """
 GSS_AUTH_AVAILABLE = True
 
-from pyasn1.type.univ import ObjectIdentifier
-from pyasn1.codec.der import encoder, decoder
+try:
+    from pyasn1.type.univ import ObjectIdentifier
+    from pyasn1.codec.der import encoder, decoder
+except ImportError:
+    GSS_AUTH_AVAILABLE = False
+    class ObjectIdentifier(object):
+        def __init__(self, *args):
+            raise NotImplementedError("Module pyasn1 not importable")
+
+    class decoder(object):
+        def decode(self):
+            raise NotImplementedError("Module pyasn1 not importable")
+
+    class encoder(object):
+        def encode(self):
+            raise NotImplementedError("Module pyasn1 not importable")
 
 from paramiko.common import MSG_USERAUTH_REQUEST
 from paramiko.ssh_exception import SSHException

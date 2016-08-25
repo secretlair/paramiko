@@ -8,7 +8,8 @@ from shared_conf import *
 
 # Releases changelog extension
 extensions.append('releases')
-releases_release_uri = "https://github.com/paramiko/paramiko/tree/%s"
+# Paramiko 1.x tags start with 'v'. Meh.
+releases_release_uri = "https://github.com/paramiko/paramiko/tree/v%s"
 releases_issue_uri = "https://github.com/paramiko/paramiko/issues/%s"
 
 # Default is 'local' building, but reference the public docs site when building

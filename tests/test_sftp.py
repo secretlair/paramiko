@@ -429,7 +429,6 @@ class SFTPTest (unittest.TestCase):
                     line_number += 1
                     pos_list.append(loc)
                     loc = f.tell()
-                self.assertTrue(f.seekable())
                 f.seek(pos_list[6], f.SEEK_SET)
                 self.assertEqual(f.readline(), 'Nouzilly, France.\n')
                 f.seek(pos_list[17], f.SEEK_SET)
@@ -611,7 +610,7 @@ class SFTPTest (unittest.TestCase):
 
         with sftp.open(FOLDER + '/bunny.txt', 'rb') as f:
             self.assertEqual(text, f.read(128))
-        self.assertEqual([(41, 41)], saved_progress)
+        self.assertEqual((41, 41), saved_progress[-1])
 
         os.unlink(localname)
         fd, localname = mkstemp()
@@ -621,7 +620,7 @@ class SFTPTest (unittest.TestCase):
 
         with open(localname, 'rb') as f:
             self.assertEqual(text, f.read(128))
-        self.assertEqual([(41, 41)], saved_progress)
+        self.assertEqual((41, 41), saved_progress[-1])
 
         os.unlink(localname)
         sftp.unlink(FOLDER + '/bunny.txt')
@@ -697,8 +696,7 @@ class SFTPTest (unittest.TestCase):
                 f.readv([(0, 12)])
 
             with sftp.open(FOLDER + '/zero', 'r') as f:
-                file_size = f.stat().st_size
-                f.prefetch(file_size)
+                f.prefetch()
                 f.read(100)
         finally:
             sftp.unlink(FOLDER + '/zero')
@@ -811,11 +809,6 @@ class SFTPTest (unittest.TestCase):
             self.assertEqual(data, NON_UTF8_DATA)
         finally:
             sftp.remove('%s/nonutf8data' % FOLDER)
-
-
-    def test_sftp_attributes_empty_str(self):
-        sftp_attributes = SFTPAttributes()
-        self.assertEqual(str(sftp_attributes), "?---------   1 0        0               0 (unknown date) ?")
 
 
 if __name__ == '__main__':
